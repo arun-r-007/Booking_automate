@@ -333,22 +333,27 @@ async function main() {
             process.stdin.on('data', onConsoleInput);
 
             let alertCount = 0;
-            const gapMs = parseInt(process.env.ALERT_GAP_MS, 10) || 300;
+            const alertIntervalSeconds = process.env.ALERT_INTERVAL_SECONDS
+              ? parseFloat(process.env.ALERT_INTERVAL_SECONDS)
+              : (process.env.ALERT_GAP_MS ? parseInt(process.env.ALERT_GAP_MS, 10) / 1000 : 2);
+            const alertIntervalMs = Math.max(100, Math.round(alertIntervalSeconds * 1000));
+
+            logger.info(`Repeated alert pace: Sending every ${alertIntervalSeconds} second(s) (customizable via ALERT_INTERVAL_SECONDS in .env)`);
 
             while (!global.stopRequested) {
               alertCount++;
-              logger.info(`[Continuous Alert #${alertCount}] Broadcasting alerts (type "stop" or "STOP" to silence)...`);
+              logger.info(`[Continuous Alert #${alertCount}] Broadcasting alerts (every ${alertIntervalSeconds}s)...`);
               await dispatchAllNotifications(alertLabel, config, customAlertMsg, page.url(), { isContinuous: true });
 
               if (global.stopRequested) break;
 
-              // Fast micro-check loop every 50ms so stop command is acted upon instantaneously (no 3s delay)
-              for (let elapsed = 0; elapsed < gapMs && !global.stopRequested; elapsed += 50) {
-                await sleep(Math.min(50, gapMs - elapsed));
+              // Fast micro-check loop every 50ms so stop command is acted upon instantaneously
+              for (let elapsed = 0; elapsed < alertIntervalMs && !global.stopRequested; elapsed += 50) {
+                await sleep(Math.min(50, alertIntervalMs - elapsed));
               }
 
-              if (alertCount % 10 === 0) {
-                logger.action(`🔔 Sent ${alertCount} continuous alerts. Type "stop" + [ENTER] or visit http://localhost:3000/stop to silence.`);
+              if (alertCount % 5 === 0) {
+                logger.action(`🔔 Sent ${alertCount} alerts (every ${alertIntervalSeconds}s). Type "stop" + [ENTER] or visit http://localhost:3000/stop to silence.`);
               }
             }
 
