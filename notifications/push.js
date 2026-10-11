@@ -29,7 +29,11 @@ async function sendPushNotification(movieName, customMessage = null, clickUrl = 
     await axios.post(`https://ntfy.sh/${topic}`, bodyText, { headers });
     logger.success('✓ Push notification sent successfully via ntfy.sh.');
   } catch (err) {
-    logger.error('Failed to send push notification via ntfy.sh', err);
+    if (err.response && err.response.status === 429) {
+      logger.warn('Push notification rate-limited by ntfy.sh (HTTP 429). Will retry on next alert cycle.');
+    } else {
+      logger.error('Failed to send push notification via ntfy.sh', err.message || err);
+    }
   }
 }
 

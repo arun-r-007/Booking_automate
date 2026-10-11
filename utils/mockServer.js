@@ -27,14 +27,34 @@ function startMockServer(isDryRun = true) {
 
           logger.info(`[Webhook] Incoming message received: "${messageText}" from ${fromNumber}`);
 
-          if (messageText === '12345') {
-            logger.success('🔑 Stop code "12345" received! Terminating alert loop...');
+          const lowerText = messageText.toLowerCase();
+          if (messageText === '12345' || lowerText.includes('stop')) {
+            logger.success(`🔑 Stop command ("${messageText}") received via webhook! Terminating alert loop...`);
             global.stopRequested = true;
           }
 
           res.writeHead(200, { 'Content-Type': 'text/xml' });
           res.end('<Response></Response>');
         });
+        return;
+      }
+
+      // 2. Quick Browser Stop Endpoint: http://localhost:3000/stop
+      if (req.url === '/stop' || req.url === '/api/stop') {
+        logger.success('🛑 Stop command received via web browser (http://localhost:3000/stop)! Halting alerts immediately...');
+        global.stopRequested = true;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`
+          <!DOCTYPE html>
+          <html>
+            <head><meta charset="utf-8"><title>Alerts Silenced</title></head>
+            <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;text-align:center;padding:50px;background:#0f172a;color:#f8fafc;">
+              <h1 style="color:#22c55e;font-size:32px;">✅ ALERTS SILENCED!</h1>
+              <p style="font-size:18px;color:#94a3b8;">Continuous notifications have been stopped.</p>
+              <p style="font-size:16px;color:#cbd5e1;">Your BookMyShow browser window is kept open so you can select seats and book.</p>
+            </body>
+          </html>
+        `);
         return;
       }
 

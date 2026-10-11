@@ -1,4 +1,5 @@
 const path = require('path');
+const readline = require('readline');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const logger = require('./utils/logger');
@@ -13,6 +14,22 @@ const { resetScreenshotCounter, captureMilestone } = require('./utils/visual');
 
 let browserInstance = null;
 let alreadyNotified = false;
+let inContinuousAlertLoop = false;
+global.stopRequested = false;
+
+function isStopCommand(raw) {
+  if (!raw) return false;
+  const str = String(raw).trim().toLowerCase();
+  return (
+    str === 'stop' ||
+    str === 's' ||
+    str === 'q' ||
+    str === 'quit' ||
+    str === 'exit' ||
+    str === '12345' ||
+    str.includes('stop')
+  );
+}
 
 // Command line argument parser
 const isDryRunArg = process.argv.includes('--dry-run');
@@ -132,7 +149,14 @@ async function main() {
     process.exit(0);
   };
 
-  process.on('SIGINT', () => cleanup(0));
+  process.on('SIGINT', () => {
+    if (inContinuousAlertLoop && !global.stopRequested) {
+      logger.success('\n🛑 [Ctrl+C] detected! Silencing continuous alerts and keeping booking page open...');
+      global.stopRequested = true;
+    } else {
+      cleanup(0);
+    }
+  });
   process.on('SIGTERM', () => cleanup(0));
 
   const monitorIntervalMs = config.simulation.monitorInterval || config.monitoring.intervalSeconds * 1000;
@@ -260,41 +284,64 @@ async function main() {
             logger.info('Triggering initial alerts across all configured channels...');
             await dispatchAllNotifications(alertLabel, config, customAlertMsg, page.url());
 
-            // Continuous alert loop across all active notification channels (ntfy, desktop, whatsapp, etc.)
-            logger.action('\n🚨🚨🚨 TICKETS ARE LIVE! ENTERING CONTINUOUS ALERT LOOP 🚨🚨🚨');
-            logger.action('👉 Send code "12345" via WhatsApp OR type "stop" + [ENTER] in this console to silence the alerts.\n');
-
+            // Continuous rapid alert loop across all active notification channels (ntfy, desktop, whatsapp, etc.)
+            inContinuousAlertLoop = true;
             global.stopRequested = false;
 
-            // Listen for user entering "stop" in the console
-            const onConsoleStop = (chunk) => {
-              const input = chunk.toString().trim().toLowerCase();
-              if (input === 'stop' || input === '12345' || input === 's' || input === '') {
-                logger.success('🛑 Stop command received in console! Halting continuous alerts...');
+            logger.action('\n================================================================================');
+            logger.action('🚨🚨🚨 TICKETS ARE LIVE! CONTINUOUS RAPID ALERTS ACTIVE 🚨🚨🚨');
+            logger.action('👉 TO STOP ALERTS (ANY OF THESE):');
+            logger.action('   1. Type "stop" (or "STOP", "Stop", "s", "q") + [ENTER] in this console');
+            logger.action('   2. OR press [Ctrl+C] in this console');
+            logger.action('   3. OR open http://localhost:3000/stop in your browser');
+            logger.action('================================================================================\n');
+
+            // Setup robust case-insensitive readline listener + raw stdin listener
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout,
+              terminal: false
+            });
+
+            const onConsoleInput = (input) => {
+              if (isStopCommand(input)) {
+                logger.success(`🛑 Stop command ("${String(input).trim()}") received! Halting alerts immediately...`);
                 global.stopRequested = true;
               }
             };
 
+            rl.on('line', onConsoleInput);
             process.stdin.resume();
             process.stdin.setEncoding('utf8');
-            process.stdin.on('data', onConsoleStop);
+            process.stdin.on('data', onConsoleInput);
 
-            let alertCount = 1;
+            let alertCount = 0;
+            const gapMs = parseInt(process.env.ALERT_GAP_MS, 10) || 300;
+
             while (!global.stopRequested) {
-              logger.info(`[Continuous Alert #${alertCount}] Broadcasting alerts to all channels...`);
+              alertCount++;
+              logger.info(`[Continuous Alert #${alertCount}] Broadcasting alerts (type "stop" or "STOP" to silence)...`);
               await dispatchAllNotifications(alertLabel, config, customAlertMsg, page.url());
 
-              // 3 second interval between alerts
-              await sleep(3000);
-              alertCount++;
+              if (global.stopRequested) break;
 
-              if (alertCount % 5 === 0) {
-                logger.action(`🔔 Sent ${alertCount} continuous alerts. Type "stop" + [ENTER] in console to stop.`);
+              // Fast micro-check loop every 50ms so stop command is acted upon instantaneously (no 3s delay)
+              for (let elapsed = 0; elapsed < gapMs && !global.stopRequested; elapsed += 50) {
+                await sleep(Math.min(50, gapMs - elapsed));
+              }
+
+              if (alertCount % 10 === 0) {
+                logger.action(`🔔 Sent ${alertCount} continuous alerts. Type "stop" + [ENTER] or visit http://localhost:3000/stop to silence.`);
               }
             }
 
-            process.stdin.removeListener('data', onConsoleStop);
-            logger.success('✅ Continuous alert loop stopped by user.');
+            try {
+              rl.close();
+              process.stdin.removeListener('data', onConsoleInput);
+            } catch (e) {}
+
+            inContinuousAlertLoop = false;
+            logger.success('✅ Continuous alert loop silenced. Booking page remains open for seat selection!');
           } else {
             logger.info('Showtime already reported. Duplicate alerts suppressed.');
           }
