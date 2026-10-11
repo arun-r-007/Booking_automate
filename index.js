@@ -177,6 +177,16 @@ async function main() {
   process.on('SIGTERM', () => cleanup(0));
 
   const monitorIntervalMs = config.simulation.monitorInterval || config.monitoring.intervalSeconds * 1000;
+  
+  // Heartbeat interval when tickets are not open (default: 10 minutes, configurable via HEARTBEAT_INTERVAL_MINUTES in .env)
+  const heartbeatMinutes = process.env.HEARTBEAT_INTERVAL_MINUTES !== undefined
+    ? parseFloat(process.env.HEARTBEAT_INTERVAL_MINUTES)
+    : 10;
+  const heartbeatIntervalMs = heartbeatMinutes > 0 ? heartbeatMinutes * 60 * 1000 : null;
+  if (heartbeatIntervalMs) {
+    logger.info(`Status heartbeat: Updates sent every ${heartbeatMinutes} min(s) while tickets are not open (customizable via HEARTBEAT_INTERVAL_MINUTES in .env).`);
+  }
+
   let lastHeartbeatTime = Date.now();
   let initialStatusSent = false;
 
@@ -230,26 +240,35 @@ async function main() {
             if (!initialStatusSent) {
               initialStatusSent = true;
               lastHeartbeatTime = Date.now();
+              const initialMsg = `🔍 BMS Monitor Started: Monitoring "${config.movie.name}" in "${config.movie.city}". "${cinemaTargets.join(' / ')}" is not listed yet.`;
               if (config.notifications.twilioWhatsApp) {
                 logger.info('Sending initial status verification to WhatsApp...');
                 const sendWhatsAppNotification = require('./notifications/whatsapp');
-                const heartbeatMsg = `🔍 *BMS Monitor Started:* Monitoring *${config.movie.name}* in *${config.movie.city}*. *${cinemaTargets.join(' / ')}* is not listed yet.`;
-                sendWhatsAppNotification(config.movie.name, heartbeatMsg).catch((err) => {
+                sendWhatsAppNotification(config.movie.name, initialMsg).catch((err) => {
                   logger.error('Failed to send initial WhatsApp alert:', err.message);
                 });
               }
-            } else {
-              // Heartbeat status notification every 10 minutes
+              if (config.notifications.ntfy) {
+                logger.info('Sending initial status verification to ntfy...');
+                const sendPushNotification = require('./notifications/push');
+                sendPushNotification(config.movie.name, initialMsg, page.url(), { isAlert: false });
+              }
+            } else if (heartbeatIntervalMs) {
+              // Heartbeat status notification every N minutes
               const now = Date.now();
-              if (now - lastHeartbeatTime >= 600000) {
+              if (now - lastHeartbeatTime >= heartbeatIntervalMs) {
                 lastHeartbeatTime = now;
+                const heartbeatMsg = `🔍 BMS Monitor: "${cinemaTargets.join(' / ')}" is not listed yet for "${config.movie.name}" in "${config.movie.city}". Monitoring active every ${monitorIntervalMs / 1000}s.`;
+                logger.info(`[Heartbeat] Sending ${heartbeatMinutes}-min status update to active notification channels...`);
                 if (config.notifications.twilioWhatsApp) {
-                  logger.info('Sending status verification heartbeat to WhatsApp...');
                   const sendWhatsAppNotification = require('./notifications/whatsapp');
-                  const heartbeatMsg = `🔍 *BMS Monitor:* *${cinemaTargets.join(' / ')}* is not listed yet for *${config.movie.name}* in *${config.movie.city}*. Monitoring active every ${monitorIntervalMs / 1000}s.`;
                   sendWhatsAppNotification(config.movie.name, heartbeatMsg).catch((err) => {
                     logger.error('Failed to send heartbeat WhatsApp alert:', err.message);
                   });
+                }
+                if (config.notifications.ntfy) {
+                  const sendPushNotification = require('./notifications/push');
+                  sendPushNotification(config.movie.name, heartbeatMsg, page.url(), { isAlert: false });
                 }
               }
             }
@@ -378,32 +397,39 @@ async function main() {
           if (!initialStatusSent) {
             initialStatusSent = true;
             lastHeartbeatTime = Date.now();
+            const allTimesStr = showtimesResult.allShowtimes.map((s) => s.time).join(', ') || 'None';
+            const initialMsg = `🔍 BMS Monitor Connected: "${activeCinemaName}" is open (${allTimesStr}), waiting for showtimes before "${cutoffTime}" for "${config.movie.name}".`;
+
             if (config.notifications.twilioWhatsApp) {
-              const allTimesStr = showtimesResult.allShowtimes.map((s) => s.time).join(', ') || 'None';
               logger.info('Sending initial status verification to WhatsApp...');
               const sendWhatsAppNotification = require('./notifications/whatsapp');
-              const heartbeatMsg = `🔍 *BMS Monitor Connected:* *${activeCinemaName}* is open (${allTimesStr}), waiting for showtimes before *${cutoffTime}* for *${config.movie.name}*.`;
-              sendWhatsAppNotification(config.movie.name, heartbeatMsg).catch((err) => {
+              sendWhatsAppNotification(config.movie.name, initialMsg).catch((err) => {
                 logger.error('Failed to send initial WhatsApp alert:', err.message);
               });
             }
             if (config.notifications.ntfy) {
+              logger.info('Sending initial status verification to ntfy...');
               const sendPushNotification = require('./notifications/push');
-              sendPushNotification(config.movie.name, `🔍 BMS Monitor Connected: Watching ${activeCinemaName} for showtimes before ${cutoffTime}!`, page.url());
+              sendPushNotification(config.movie.name, initialMsg, page.url(), { isAlert: false });
             }
-          } else {
-            // Heartbeat status notification every 10 minutes
+          } else if (heartbeatIntervalMs) {
+            // Heartbeat status notification every N minutes
             const now = Date.now();
-            if (now - lastHeartbeatTime >= 600000) {
+            if (now - lastHeartbeatTime >= heartbeatIntervalMs) {
               lastHeartbeatTime = now;
+              const allTimesStr = showtimesResult.allShowtimes.map((s) => s.time).join(', ') || 'None';
+              const heartbeatMsg = `🔍 BMS Monitor: "${activeCinemaName}" has shows (${allTimesStr}), but no show before "${cutoffTime}" yet for "${config.movie.name}". Still monitoring every ${monitorIntervalMs / 1000}s.`;
+
+              logger.info(`[Heartbeat] Sending ${heartbeatMinutes}-min status update to active notification channels...`);
               if (config.notifications.twilioWhatsApp) {
-                const allTimesStr = showtimesResult.allShowtimes.map((s) => s.time).join(', ') || 'None';
-                logger.info('Sending status verification heartbeat to WhatsApp...');
                 const sendWhatsAppNotification = require('./notifications/whatsapp');
-                const heartbeatMsg = `🔍 *BMS Monitor:* *${activeCinemaName}* has shows (${allTimesStr}), but no show before *${cutoffTime}* yet for *${config.movie.name}*. Checking every ${monitorIntervalMs / 1000}s.`;
                 sendWhatsAppNotification(config.movie.name, heartbeatMsg).catch((err) => {
                   logger.error('Failed to send heartbeat WhatsApp alert:', err.message);
                 });
+              }
+              if (config.notifications.ntfy) {
+                const sendPushNotification = require('./notifications/push');
+                sendPushNotification(config.movie.name, heartbeatMsg, page.url(), { isAlert: false });
               }
             }
           }

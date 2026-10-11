@@ -1,7 +1,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
-async function sendPushNotification(movieName, customMessage = null, clickUrl = null) {
+async function sendPushNotification(movieName, customMessage = null, clickUrl = null, options = {}) {
   const config = require('../utils/helpers').getConfig();
   const topic = config.ntfy.topic;
 
@@ -10,14 +10,21 @@ async function sendPushNotification(movieName, customMessage = null, clickUrl = 
     return;
   }
 
+  const isAlert = options.isAlert !== false;
+
   try {
     logger.info(`Sending ntfy push notification to topic: ${topic}...`);
     const headers = {
-      'Title': 'BookMyShow Early Ticket Alert',
-      'Priority': 'urgent',
-      'Tags': 'tada,movie,ticket',
-      'Actions': `view, 🎟️ Book Now, ${clickUrl || 'https://in.bookmyshow.com'}; http, 🛑 Stop Alerts, https://ntfy.sh/${topic}, method=POST, body=stop`
+      'Title': options.title || (isAlert ? 'BookMyShow Early Ticket Alert' : 'BMS Monitor Status Update'),
+      'Priority': options.priority || (isAlert ? 'urgent' : 'default'),
+      'Tags': options.tags || (isAlert ? 'tada,movie,ticket' : 'hourglass,mag')
     };
+
+    if (isAlert) {
+      headers['Actions'] = `view, 🎟️ Book Now, ${clickUrl || 'https://in.bookmyshow.com'}; http, 🛑 Stop Alerts, https://ntfy.sh/${topic}, method=POST, body=stop`;
+    } else if (clickUrl) {
+      headers['Actions'] = `view, 🎟️ View Showtimes, ${clickUrl}`;
+    }
 
     if (clickUrl) {
       headers['Click'] = clickUrl;
