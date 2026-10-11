@@ -15,7 +15,8 @@ async function sendPushNotification(movieName, customMessage = null, clickUrl = 
     const headers = {
       'Title': 'BookMyShow Early Ticket Alert',
       'Priority': 'urgent',
-      'Tags': 'tada,movie,ticket'
+      'Tags': 'tada,movie,ticket',
+      'Actions': `view, 🎟️ Book Now, ${clickUrl || 'https://in.bookmyshow.com'}; http, 🛑 Stop Alerts, https://ntfy.sh/${topic}, method=POST, body=stop`
     };
 
     if (clickUrl) {

@@ -9,6 +9,7 @@ const openBookingPage = require('./browser/openBookingPage');
 const { checkCinemaPresence, parseTargets } = require('./browser/checkCinema');
 const { checkShowtimesBeforeCutoff } = require('./browser/checkShowtimes');
 const { dispatchAllNotifications } = require('./notifications/manager');
+const { startNtfyListener, stopNtfyListener } = require('./notifications/ntfyListener');
 const { startMockServer, stopMockServer } = require('./utils/mockServer');
 const { resetScreenshotCounter, captureMilestone } = require('./utils/visual');
 
@@ -111,6 +112,13 @@ async function main() {
     process.exit(1);
   }
 
+  // Start background ntfy topic listener to allow typing "stop" inside the mobile app
+  if (config.notifications.ntfy && config.ntfy && config.ntfy.topic) {
+    startNtfyListener(config.ntfy.topic, (receivedCmd) => {
+      global.stopRequested = true;
+    });
+  }
+
   // Validate the inputs before burning a browser launch
   if (!config.booking.url || config.booking.url.trim() === '') {
     logger.error('No booking URL configured. Set BOOKING_URL in .env and restart.');
@@ -145,6 +153,7 @@ async function main() {
       } catch (err) {}
     }
     stopMockServer();
+    stopNtfyListener();
     logger.success('✓ Cleanup complete. Monitor stopped.');
     process.exit(0);
   };
@@ -291,9 +300,10 @@ async function main() {
             logger.action('\n================================================================================');
             logger.action('🚨🚨🚨 TICKETS ARE LIVE! CONTINUOUS RAPID ALERTS ACTIVE 🚨🚨🚨');
             logger.action('👉 TO STOP ALERTS (ANY OF THESE):');
-            logger.action('   1. Type "stop" (or "STOP", "Stop", "s", "q") + [ENTER] in this console');
-            logger.action('   2. OR press [Ctrl+C] in this console');
-            logger.action('   3. OR open http://localhost:3000/stop in your browser');
+            logger.action('   1. Type "stop" (or "STOP", "s", "q") + [ENTER] in this console');
+            logger.action('   2. OR inside the mobile ntfy app: type "stop" + Send, or tap [🛑 Stop Alerts]');
+            logger.action('   3. OR press [Ctrl+C] in this console');
+            logger.action('   4. OR open http://localhost:3000/stop in your browser');
             logger.action('================================================================================\n');
 
             // Setup robust case-insensitive readline listener + raw stdin listener
