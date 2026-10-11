@@ -1,0 +1,17 @@
+{
+  "citySelector": {
+    "searchBox": "input[placeholder*='Search for your city']",
+    "cityItem": "text={cityName}",
+    "popularCities": "ul li span",
+    "detectSelectCityModal": "text=Select your city"
+  },
+  "search": {
+    "searchContainer": "span:has-text('Search for Movies, Events, Plays, Sports and Activities'), span:has-text('Search for Movies'), div#search, div[role='button'][aria-label*='Search for Movies']",
+    "searchInput": "input[placeholder*='Search for Movies, Events, Plays, Sports and Activities'], input[placeholder*='Search for Movies'], input[placeholder*='Search'], input[type='text'], input",
+    "searchResultList": "div[class*='search-result'], ul",
+    "searchResultItem": "span:has-text('{movieName}'), div:has-text('{movieName}'), a:has-text('{movieName}')"
+  },
+  "moviePage": {
+    "bookButton": "#page-cta-container button, button:has-text('Book tickets'), button:has-text('Book'), a:has-text('Book tickets')"
+  }
+}

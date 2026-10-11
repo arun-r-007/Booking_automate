@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables & Private secrets (CRITICAL: Never commit API keys/tokens)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Runtime logs & debug output
+logs/*.log
+logs/app.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Screenshot artifacts (prevent repository bloat)
+logs/screenshots/*.png
+logs/screenshots/
+
+# Temporary test scripts
+scratch/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS-specific generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE configuration
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace

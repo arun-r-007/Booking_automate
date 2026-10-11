@@ -1,0 +1,6 @@
+node_modules
+logs/screenshots/*.png
+logs/app.log
+.git
+.gitignore
+scratch

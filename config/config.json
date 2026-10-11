@@ -1,0 +1,54 @@
+{
+  "movie": {
+    "name": "Gatta Kusthi 2",
+    "city": "Coimbatore",
+    "directUrl": ""
+  },
+  "booking": {
+    "url": "",
+    "cinemaText": "",
+    "targetTimeBefore": "10:00 AM"
+  },
+  "monitoring": {
+    "intervalSeconds": 5,
+    "headless": false,
+    "screenshotOnSuccess": true,
+    "dryRun": false
+  },
+  "simulation": {
+    "mouseMoveSteps": 25,
+    "typingDelay": 100,
+    "clickDelay": 500,
+    "pageLoadDelay": 2000,
+    "highlightDuration": 700,
+    "keepBrowserOpenAfterSuccess": 5000
+  },
+  "notifications": {
+    "desktop": true,
+    "telegram": false,
+    "ntfy": true,
+    "twilioVoice": false,
+    "twilioSMS": false,
+    "twilioWhatsApp": false
+  },
+  "twilio": {
+    "accountSid": "",
+    "fromNumber": "+14155238886",
+    "toNumber": [
+      "+919342638763",
+      "+916379210929",
+      "+919688081349",
+      "+918220320997",
+      "+918778276926",
+      "+918668110539",
+      "+916379210929"
+    ],
+    "whatsappFromNumber": "whatsapp:+14155238886"
+  },
+  "telegram": {
+    "chatId": ""
+  },
+  "ntfy": {
+    "topic": "bms-movie-monitor-alerts"
+  }
+}
