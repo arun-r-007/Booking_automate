@@ -9,6 +9,7 @@ const openBookingPage = require('./browser/openBookingPage');
 const { checkCinemaPresence, parseTargets } = require('./browser/checkCinema');
 const { checkShowtimesBeforeCutoff } = require('./browser/checkShowtimes');
 const { dispatchAllNotifications } = require('./notifications/manager');
+const { dismissDesktopNotifications } = require('./notifications/desktop');
 const { startNtfyListener, stopNtfyListener } = require('./notifications/ntfyListener');
 const { startMockServer, stopMockServer } = require('./utils/mockServer');
 const { resetScreenshotCounter, captureMilestone } = require('./utils/visual');
@@ -30,6 +31,13 @@ function isStopCommand(raw) {
     str === '12345' ||
     str.includes('stop')
   );
+}
+
+function requestStop(source = 'user command') {
+  if (global.stopRequested) return;
+  global.stopRequested = true;
+  dismissDesktopNotifications();
+  logger.success(`🛑 Stop requested (${source})! Halting continuous alerts immediately...`);
 }
 
 // Command line argument parser
@@ -115,7 +123,7 @@ async function main() {
   // Start background ntfy topic listener to allow typing "stop" inside the mobile app
   if (config.notifications.ntfy && config.ntfy && config.ntfy.topic) {
     startNtfyListener(config.ntfy.topic, (receivedCmd) => {
-      global.stopRequested = true;
+      requestStop(`ntfy app command: "${receivedCmd}"`);
     });
   }
 
@@ -140,6 +148,7 @@ async function main() {
 
   // Graceful cleanup handler
   const cleanup = async (keepBrowserOpenDuration = 0) => {
+    dismissDesktopNotifications();
     if (keepBrowserOpenDuration > 0 && browserInstance) {
       logger.info(`Keeping browser open for inspection...`);
       await waitForEnter(keepBrowserOpenDuration);
@@ -160,8 +169,7 @@ async function main() {
 
   process.on('SIGINT', () => {
     if (inContinuousAlertLoop && !global.stopRequested) {
-      logger.success('\n🛑 [Ctrl+C] detected! Silencing continuous alerts and keeping booking page open...');
-      global.stopRequested = true;
+      requestStop('Ctrl+C shortcut');
     } else {
       cleanup(0);
     }
@@ -291,7 +299,7 @@ async function main() {
 
             // Trigger notifications
             logger.info('Triggering initial alerts across all configured channels...');
-            await dispatchAllNotifications(alertLabel, config, customAlertMsg, page.url());
+            await dispatchAllNotifications(alertLabel, config, customAlertMsg, page.url(), { isContinuous: false });
 
             // Continuous rapid alert loop across all active notification channels (ntfy, desktop, whatsapp, etc.)
             inContinuousAlertLoop = true;
@@ -315,8 +323,7 @@ async function main() {
 
             const onConsoleInput = (input) => {
               if (isStopCommand(input)) {
-                logger.success(`🛑 Stop command ("${String(input).trim()}") received! Halting alerts immediately...`);
-                global.stopRequested = true;
+                requestStop(`console input: "${String(input).trim()}"`);
               }
             };
 
@@ -331,7 +338,7 @@ async function main() {
             while (!global.stopRequested) {
               alertCount++;
               logger.info(`[Continuous Alert #${alertCount}] Broadcasting alerts (type "stop" or "STOP" to silence)...`);
-              await dispatchAllNotifications(alertLabel, config, customAlertMsg, page.url());
+              await dispatchAllNotifications(alertLabel, config, customAlertMsg, page.url(), { isContinuous: true });
 
               if (global.stopRequested) break;
 

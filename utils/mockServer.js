@@ -1,5 +1,6 @@
 const http = require('http');
 const logger = require('./logger');
+const { dismissDesktopNotifications } = require('../notifications/desktop');
 
 let server = null;
 const PORT = 3000;
@@ -31,6 +32,7 @@ function startMockServer(isDryRun = true) {
           if (messageText === '12345' || lowerText.includes('stop')) {
             logger.success(`🔑 Stop command ("${messageText}") received via webhook! Terminating alert loop...`);
             global.stopRequested = true;
+            dismissDesktopNotifications();
           }
 
           res.writeHead(200, { 'Content-Type': 'text/xml' });
@@ -43,6 +45,7 @@ function startMockServer(isDryRun = true) {
       if (req.url === '/stop' || req.url === '/api/stop') {
         logger.success('🛑 Stop command received via web browser (http://localhost:3000/stop)! Halting alerts immediately...');
         global.stopRequested = true;
+        dismissDesktopNotifications();
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`
           <!DOCTYPE html>

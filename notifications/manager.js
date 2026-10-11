@@ -6,12 +6,16 @@ const triggerPhoneCall = require('./phoneCall');
 const sendSMSNotification = require('./sms');
 const sendWhatsAppNotification = require('./whatsapp');
 
-async function dispatchAllNotifications(movieName, config, customMessage = null, clickUrl = null) {
+async function dispatchAllNotifications(movieName, config, customMessage = null, clickUrl = null, options = {}) {
+  if (global.stopRequested) return;
+
+  const isContinuous = options.isContinuous || false;
   logger.info(`Dispatching availability alerts for "${movieName}"...`);
   const activeChannels = [];
   const promises = [];
 
-  if (config.notifications.desktop) {
+  // Desktop notification is only sent on initial alert to prevent queuing up dozens of Windows Action Center toasts
+  if (config.notifications.desktop && !isContinuous && !global.stopRequested) {
     activeChannels.push('Desktop');
     try {
       sendDesktopNotification(movieName);
