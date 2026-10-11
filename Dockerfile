@@ -1,5 +1,5 @@
-# Use official Microsoft Playwright image with all required Chromium OS dependencies pre-installed
-FROM mcr.microsoft.com/playwright:v1.45.1-jammy
+# Use official Microsoft Playwright v1.64.0 image with all Chromium OS dependencies pre-installed
+FROM mcr.microsoft.com/playwright:v1.64.0-jammy
 
 # Set working directory
 WORKDIR /app
@@ -16,8 +16,9 @@ COPY . .
 # Set environment variables for production headless execution
 ENV NODE_ENV=production
 ENV HEADLESS=true
+ENV PORT=3000
 
-# Expose local webhook port if needed
+# Expose local server and webhook port
 EXPOSE 3000
 
 # Start the continuous booking monitor
