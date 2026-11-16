@@ -48,13 +48,34 @@ function isTimeBeforeCutoff(timeStr, cutoffStr = '10:00 AM') {
  * - class*="sc-yr56qh" / class*="sc-1skzbbo"
  * - buttons/spans containing time regex
  */
-async function extractShowtimesFromPage(page) {
-  return await page.evaluate(() => {
+async function extractShowtimesFromPage(page, cinemaTargets = []) {
+  return await page.evaluate((targets) => {
     const results = [];
     const seenTimes = new Set();
+    const TIME_RE = /\d{1,2}:\d{2}\s*(?:AM|PM)/i;
+
+    // Optionally scope to a single cinema row (needed on movie pages listing many cinemas)
+    let scope = document;
+    if (targets && targets.length > 0) {
+      scope = null;
+      const lowered = targets.map((t) => t.toLowerCase());
+      const nodes = Array.from(document.querySelectorAll('#main-content a, #main-content span, #main-content div, a, span'));
+      const nameEl = nodes.find((el) => {
+        const txt = (el.innerText || '').trim().toLowerCase();
+        return txt.length > 0 && txt.length < 120 && lowered.some((t) => txt.includes(t)) && !TIME_RE.test(txt);
+      });
+      if (nameEl) {
+        let node = nameEl;
+        while (node && node !== document.body) {
+          if (TIME_RE.test(node.innerText || '')) { scope = node; break; }
+          node = node.parentElement;
+        }
+      }
+      if (!scope) return results; // cinema not on page -> no showtimes for it
+    }
 
     // 1. Check all elements with aria-label containing "Book "
-    const ariaButtons = document.querySelectorAll('[aria-label*="Book "], [aria-label*="book "]');
+    const ariaButtons = scope.querySelectorAll('[aria-label*="Book "], [aria-label*="book "]');
     ariaButtons.forEach((btn) => {
       const label = btn.getAttribute('aria-label') || '';
       const match = label.match(/Book\s+(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
@@ -77,7 +98,7 @@ async function extractShowtimesFromPage(page) {
 
     // 2. Check elements with standard time classes or regex if aria-label was not found
     if (results.length === 0) {
-      const candidates = document.querySelectorAll('[role="button"], a, div[class*="sc-yr56qh-0"], div[class*="sc-1skzbbo"]');
+      const candidates = scope.querySelectorAll('[role="button"], a, div[class*="sc-yr56qh-0"], div[class*="sc-1skzbbo"]');
       candidates.forEach((el) => {
         const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
         const timeMatch = text.match(/\b(\d{1,2}:\d{2}\s*(?:AM|PM))\b/i);
@@ -97,17 +118,56 @@ async function extractShowtimesFromPage(page) {
     }
 
     return results;
-  });
+  }, cinemaTargets);
 }
 
 /**
  * Checks for movie showtimes scheduled before the configured cutoff time (default: 10:00 AM).
  */
+function parseTargetTimes(raw) {
+  if (!raw) return [];
+  return String(raw)
+    .split(/[,;|]/)
+    .map((t) => t.trim())
+    .filter((t) => parseTimeToMinutes(t) !== null);
+}
+
+/** Extracts the yyyymmdd date segment from a BookMyShow buytickets URL. */
+function extractUrlDate(url) {
+  const m = String(url || '').match(/\/(20\d{6})(?=[/?#]|$)/);
+  return m ? m[1] : null;
+}
+
+/** Human readable description of the active showtime filter. */
+function describeFilter(config) {
+  const exact = parseTargetTimes(config.booking?.targetTimes);
+  if (exact.length > 0) return `exactly at ${exact.join(' / ')}`;
+  return `before ${config.booking?.targetTimeBefore || '10:00 AM'}`;
+}
+
 async function checkShowtimesBeforeCutoff(page, config) {
   const cutoffTime = config.booking?.targetTimeBefore || process.env.TARGET_TIME_BEFORE || '10:00 AM';
+  const exactTimes = parseTargetTimes(config.booking?.targetTimes);
+  const exactMinutes = exactTimes.map(parseTimeToMinutes);
+  const filterText = describeFilter(config);
 
   try {
-    const allShowtimes = await extractShowtimesFromPage(page);
+    // BookMyShow silently redirects a not-yet-open date to the nearest open date.
+    const wantedDate = extractUrlDate(config.booking?.url);
+    if (wantedDate) {
+      const currentDate = extractUrlDate(page.url());
+      if (currentDate && currentDate !== wantedDate) {
+        return {
+          found: false,
+          allShowtimes: [],
+          matchingShowtimes: [],
+          cutoffTime,
+          reason: `Date ${wantedDate} not open yet (BookMyShow redirected to ${currentDate}).`
+        };
+      }
+    }
+
+    const allShowtimes = await extractShowtimesFromPage(page, config.booking?.scopeCinemaTargets || []);
 
     if (allShowtimes.length === 0) {
       return {
@@ -123,7 +183,9 @@ async function checkShowtimesBeforeCutoff(page, config) {
     logger.info(`Detected showtimes on page (${timeList.length}): ${timeList.join(' | ')}`);
 
     // Filter showtimes strictly before cutoff time (e.g. < 10:00 AM)
-    const matchingShowtimes = allShowtimes.filter((s) => isTimeBeforeCutoff(s.time, cutoffTime));
+    const matchingShowtimes = exactMinutes.length > 0
+      ? allShowtimes.filter((s) => exactMinutes.includes(parseTimeToMinutes(s.time)))
+      : allShowtimes.filter((s) => isTimeBeforeCutoff(s.time, cutoffTime));
 
     if (matchingShowtimes.length === 0) {
       return {
@@ -131,7 +193,7 @@ async function checkShowtimesBeforeCutoff(page, config) {
         allShowtimes,
         matchingShowtimes: [],
         cutoffTime,
-        reason: `Showtimes are open (${timeList.join(' | ')}), but NONE are before ${cutoffTime} yet.`
+        reason: `Showtimes are open (${timeList.join(' | ')}), but NONE ${filterText} yet.`
       };
     }
 
@@ -154,7 +216,7 @@ async function checkShowtimesBeforeCutoff(page, config) {
       allShowtimes,
       matchingShowtimes,
       cutoffTime,
-      reason: `Found showtime(s) before ${cutoffTime}: ${matchedTimes.join(', ')}`
+      reason: `Found showtime(s) ${filterText}: ${matchedTimes.join(', ')}`
     };
   } catch (err) {
     logger.error('Error scanning page showtimes', err);
@@ -172,5 +234,8 @@ module.exports = {
   checkShowtimesBeforeCutoff,
   extractShowtimesFromPage,
   isTimeBeforeCutoff,
-  parseTimeToMinutes
+  parseTimeToMinutes,
+  parseTargetTimes,
+  extractUrlDate,
+  describeFilter
 };

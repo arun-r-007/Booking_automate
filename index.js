@@ -7,7 +7,7 @@ const { getConfig, sleep } = require('./utils/helpers');
 const launchBrowser = require('./browser/launch');
 const openBookingPage = require('./browser/openBookingPage');
 const { checkCinemaPresence, parseTargets } = require('./browser/checkCinema');
-const { checkShowtimesBeforeCutoff } = require('./browser/checkShowtimes');
+const { checkShowtimesBeforeCutoff, describeFilter } = require('./browser/checkShowtimes');
 const { dispatchAllNotifications } = require('./notifications/manager');
 const { dismissDesktopNotifications } = require('./notifications/desktop');
 const { startNtfyListener, stopNtfyListener } = require('./notifications/ntfyListener');
@@ -92,6 +92,7 @@ async function main() {
   }
   config.booking.targetTimeBefore =
     process.env.TARGET_TIME_BEFORE || config.booking.targetTimeBefore || '10:00 AM';
+  config.booking.targetTimes = process.env.TARGET_TIMES || config.booking.targetTimes || '';
 
   // Override dryRun with command line arg if present
   if (isDryRunArg) {
@@ -141,10 +142,22 @@ async function main() {
     process.exit(1);
   }
 
-  const cutoffTime = config.booking.targetTimeBefore;
+  const cutoffTime = describeFilter(config);
+  // On a movie page (/movies/.../buytickets/...), stay on it and scope showtimes to the target
+  // cinema's row; navigating to the cinema page would mix in other movies' showtimes.
+  const stayOnMoviePage = /\/movies\//.test(config.booking.url) && !config.monitoring.dryRun;
+  config.booking.scopeCinemaTargets = stayOnMoviePage ? cinemaTargets : [];
+  const refreshPage = async (page) => {
+    if (stayOnMoviePage) {
+      // goto (not reload) so a redirect to another date is undone every cycle
+      await page.goto(config.booking.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } else {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+    }
+  };
   logger.info(`Target page: ${config.booking.url}`);
   logger.info(`Watching for cinema text: ${cinemaTargets.join(' | ')}`);
-  logger.info(`Filter condition: Showtime scheduled strictly BEFORE ${cutoffTime}`);
+  logger.info(`Filter condition: Showtime scheduled ${cutoffTime}`);
 
   // Graceful cleanup handler
   const cleanup = async (keepBrowserOpenDuration = 0) => {
@@ -276,7 +289,7 @@ async function main() {
             logger.info(`Retrying cinema check in ${monitorIntervalMs / 1000} seconds...`);
             await sleep(monitorIntervalMs);
             logger.action('Reloading movie page to check for newly added cinemas...');
-            await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+            await refreshPage(page);
             await sleep(config.simulation.pageLoadDelay || 2000);
             await openBookingPage.waitForShowtimesList(page);
             continue;
@@ -288,7 +301,7 @@ async function main() {
           await captureMilestone(page, 'cinema_found');
 
           // If a dedicated cinema page URL exists, navigate to the "new link"
-          if (cinemaResult.cinemaUrl) {
+          if (cinemaResult.cinemaUrl && !stayOnMoviePage) {
             logger.action(`Navigating to the cinema's new link: ${cinemaResult.cinemaUrl}`);
             await page.goto(cinemaResult.cinemaUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await sleep(config.simulation.pageLoadDelay || 2000);
@@ -302,16 +315,16 @@ async function main() {
         // ========================================================
         // STAGE 2: Scan Movie Showtimes Scheduled Before Cutoff Time
         // ========================================================
-        logger.action(`Checking for movie showtimes before ${cutoffTime} at ${activeCinemaName}...`);
+        logger.action(`Checking for movie showtimes ${cutoffTime} at ${activeCinemaName}...`);
         const showtimesResult = await checkShowtimesBeforeCutoff(page, config);
 
         if (showtimesResult.found) {
           const matchedTimes = showtimesResult.matchingShowtimes.map((s) => s.time).join(', ');
-          logger.success(`🎉 SHOWTIME FOUND BEFORE ${cutoffTime}! Times: ${matchedTimes}`);
+          logger.success(`🎉 SHOWTIME FOUND ${cutoffTime}! Times: ${matchedTimes}`);
           await captureMilestone(page, 'showtime_found');
 
           const alertLabel = `${config.movie.name} @ ${activeCinemaName} (${matchedTimes})`;
-          const customAlertMsg = `🎉 *EARLY SHOW AVAILABLE!* Tickets for *${config.movie.name}* at *${activeCinemaName}* are open for *${matchedTimes}* (< ${cutoffTime})! Book now: ${page.url()}`;
+          const customAlertMsg = `🎉 *SHOW AVAILABLE!* Tickets for *${config.movie.name}* at *${activeCinemaName}* are open for *${matchedTimes}* (${cutoffTime})! Book now: ${page.url()}`;
 
           if (!alreadyNotified) {
             alreadyNotified = true;
@@ -398,7 +411,7 @@ async function main() {
             initialStatusSent = true;
             lastHeartbeatTime = Date.now();
             const allTimesStr = showtimesResult.allShowtimes.map((s) => s.time).join(', ') || 'None';
-            const initialMsg = `🔍 BMS Monitor Connected: "${activeCinemaName}" is open (${allTimesStr}), waiting for showtimes before "${cutoffTime}" for "${config.movie.name}".`;
+            const initialMsg = `🔍 BMS Monitor Connected: "${activeCinemaName}" is open (${allTimesStr}), waiting for showtimes ${cutoffTime} for "${config.movie.name}".`;
 
             if (config.notifications.twilioWhatsApp) {
               logger.info('Sending initial status verification to WhatsApp...');
@@ -418,7 +431,7 @@ async function main() {
             if (now - lastHeartbeatTime >= heartbeatIntervalMs) {
               lastHeartbeatTime = now;
               const allTimesStr = showtimesResult.allShowtimes.map((s) => s.time).join(', ') || 'None';
-              const heartbeatMsg = `🔍 BMS Monitor: "${activeCinemaName}" has shows (${allTimesStr}), but no show before "${cutoffTime}" yet for "${config.movie.name}". Still monitoring every ${monitorIntervalMs / 1000}s.`;
+              const heartbeatMsg = `🔍 BMS Monitor: "${activeCinemaName}" has shows (${allTimesStr}), but no show ${cutoffTime} yet for "${config.movie.name}". Still monitoring every ${monitorIntervalMs / 1000}s.`;
 
               logger.info(`[Heartbeat] Sending ${heartbeatMinutes}-min status update to active notification channels...`);
               if (config.notifications.twilioWhatsApp) {
@@ -442,7 +455,7 @@ async function main() {
 
         // Reload cinema page to catch new showtimes the instant they are added
         logger.action('Reloading cinema showtimes page...');
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+        await refreshPage(page);
         await sleep(config.simulation.pageLoadDelay || 2000);
         await openBookingPage.waitForShowtimesList(page);
       }
